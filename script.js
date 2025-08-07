@@ -1,33 +1,14 @@
-// Importa os módulos necessários do Firebase
-import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-import { getFirestore, collection, doc, addDoc, getDoc, updateDoc, deleteDoc, onSnapshot, query, where, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js"; // Adicionado setDoc
+// Importa o cliente Supabase
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm';
 
-// ATENÇÃO: Para fins de demonstração e depuração, a configuração do Firebase
-// foi incluída diretamente aqui. Em um ambiente de produção real,
-// as chaves de API NUNCA devem ser expostas no código do frontend.
-// O ideal é que o ambiente do Canvas injete essas variáveis de forma segura.
-const firebaseConfig = {
-  apiKey: "AIzaSyDP.LcxPSH1Erb7GvQWkgKMwKHMnyP2c", // Sua chave API do screenshot
-  authDomain: "wishlistdiasz.firebaseapp.com",
-  projectId: "wishlistdiasz",
-  storageBucket: "wishlistdiasz.appspot.com",
-  messagingSenderId: "353481257616", // Seu Project Number
-  appId: "1:353481257616:web:7bb922e70419f1ffde15", // SEU APP ID CORRIGIDO AQUI
-  measurementId: "G-DL8ZCZWTMZ" // Adicionado o measurementId
-};
+// ATENÇÃO: Substitua estes valores pelas suas credenciais do Supabase.
+// Em um ambiente de produção real, estas chaves NUNCA devem ser expostas diretamente no frontend.
+// Use variáveis de ambiente ou um proxy de backend.
+const SUPABASE_URL = 'https://efomrlywiewbunbdnyqg.supabase.co'; // Ex: https://abcdefg.supabase.co
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVmb21ybHl3aWV3YnVuYmRueXFnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQ0OTcxMTIsImV4cCI6MjA3MDA3MzExMn0.G02RHhwi3x9Y43Uv0WOWmre_0_YIkjTatLm-w33gj0k'; // Ex: eyJhbGciOiJIUzI1Ni...
 
-// O appId para o caminho do Firestore deve ser o projectId
-const appId = firebaseConfig.projectId;
-
-// Log da configuração do Firebase para depuração
-console.log('Configuração do Firebase carregada:', firebaseConfig);
-
-
-// Inicializa o Firebase
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
+// Inicializa o cliente Supabase
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Referências aos elementos do DOM
 const authSection = document.getElementById('auth-section');
@@ -45,7 +26,7 @@ const backToChoicesFromSignupBtn = document.getElementById('back-to-choices-from
 
 const loginEmailInput = document.getElementById('login-email');
 const loginPasswordInput = document.getElementById('login-password');
-const signupUsernameInput = document.getElementById('signup-usuario'); // Novo campo
+const signupUsernameInput = document.getElementById('signup-usuario');
 const signupEmailInput = document.getElementById('signup-email');
 const signupPasswordInput = document.getElementById('signup-password');
 
@@ -67,8 +48,8 @@ const modalMessage = document.getElementById('modal-message');
 const closeModalBtn = document.getElementById('close-modal-btn');
 const loadingSpinner = document.getElementById('loading-spinner');
 
-let currentUserId = null;
-let unsubscribeFromWishlist = null; // Para gerenciar a inscrição do onSnapshot
+let currentUserId = null; // ID do usuário Supabase
+let currentUsername = null; // Nome de usuário Supabase
 
 // --- Funções de UI ---
 
@@ -120,7 +101,7 @@ function showInitialAuthChoices() {
     // Limpa os campos de email e senha ao voltar
     loginEmailInput.value = '';
     loginPasswordInput.value = '';
-    signupUsernameInput.value = ''; // Limpa o campo de username
+    signupUsernameInput.value = '';
     signupEmailInput.value = '';
     signupPasswordInput.value = '';
     console.log('Mostrando opções iniciais de autenticação.');
@@ -147,52 +128,60 @@ function showSignupForm() {
 }
 
 /**
- * Atualiza a interface do usuário com base no estado de autenticação.
- * @param {Object | null} user - O objeto de usuário do Firebase ou null se deslogado.
+ * Atualiza a interface do usuário com base no estado de autenticação do Supabase.
+ * @param {Object | null} session - O objeto de sessão do Supabase ou null se deslogado.
  */
-async function updateUIForAuthState(user) {
-    console.log('Auth state changed. User:', user ? user.uid : 'null');
-    if (user) {
-        currentUserId = user.uid;
-        let usernameToDisplay = user.email; // Padrão é o email
+async function updateUIForAuthState(session) {
+    console.log('Auth state changed. Session:', session ? session.user.id : 'null');
+    if (session) {
+        currentUserId = session.user.id;
+        let usernameToDisplay = session.user.email; // Padrão é o email
 
-        // Tenta buscar o nome de usuário do Firestore
+        // Tenta buscar o nome de usuário da tabela 'users' no Supabase
         try {
-            const userDocRef = doc(db, `artifacts/${appId}/users/${currentUserId}`);
-            const userDocSnap = await getDoc(userDocRef);
-            if (userDocSnap.exists() && userDocSnap.data().username) {
-                usernameToDisplay = userDocSnap.data().username;
+            const { data: userData, error: userError } = await supabase
+                .from('users')
+                .select('username')
+                .eq('id', currentUserId)
+                .single();
+
+            if (userError) throw userError;
+
+            if (userData && userData.username) {
+                usernameToDisplay = userData.username;
+                currentUsername = userData.username;
+            } else {
+                currentUsername = session.user.email;
             }
         } catch (error) {
-            console.warn("Não foi possível buscar o nome de usuário do Firestore:", error);
+            console.warn("Não foi possível buscar o nome de usuário do Supabase:", error.message);
+            currentUsername = session.user.email;
         }
 
-        userInfoSpan.textContent = `Usuário: ${usernameToDisplay}`; // Exibe o nome de usuário
+        userInfoSpan.textContent = `Usuário: ${usernameToDisplay}`;
         authSection.classList.add('hidden');
         wishlistSection.classList.remove('hidden');
         logoutBtn.classList.remove('hidden');
-        setupRealtimeListener(currentUserId); // Inicia o listener em tempo real
+        loadWishlistItems(); // Carrega os itens da wishlist para o usuário logado
         console.log('Usuário logado. Exibindo wishlist.');
     } else {
         currentUserId = null;
+        currentUsername = null;
         userInfoSpan.textContent = '';
         authSection.classList.remove('hidden');
         wishlistSection.classList.add('hidden');
         logoutBtn.classList.add('hidden');
         wishlistItemsDiv.innerHTML = '<p class="text-center text-gray-500 col-span-full" id="no-items-message">Nenhum item na sua wishlist ainda. Adicione um!</p>';
-        if (unsubscribeFromWishlist) {
-            unsubscribeFromWishlist(); // Desinscreve o listener anterior
-        }
         showInitialAuthChoices(); // Garante que as opções iniciais sejam mostradas ao deslogar
         console.log('Usuário deslogado. Exibindo opções de autenticação.');
     }
     hideLoading();
 }
 
-// --- Funções de Autenticação Firebase ---
+// --- Funções de Autenticação Supabase ---
 
 /**
- * Tenta logar o usuário com email e senha.
+ * Tenta logar o usuário com email e senha no Supabase.
  */
 async function handleLogin() {
     console.log('Tentando fazer login...');
@@ -207,16 +196,21 @@ async function handleLogin() {
     }
 
     try {
-        await signInWithEmailAndPassword(auth, email, password);
+        const { data, error } = await supabase.auth.signInWithPassword({
+            email: email,
+            password: password,
+        });
+
+        if (error) throw error;
+
         showMessage('Login realizado com sucesso!', 'success');
-        console.log('Login bem-sucedido para:', email);
+        console.log('Login bem-sucedido para:', data.user.email);
+        // updateUIForAuthState será chamado pelo listener onAuthStateChange
     } catch (error) {
         console.error("Erro ao fazer login:", error);
         let errorMessage = 'Erro ao fazer login. Verifique seu email e senha.';
-        if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
+        if (error.message.includes('Invalid login credentials')) {
             errorMessage = 'Email ou senha inválidos.';
-        } else if (error.code === 'auth/invalid-email') {
-            errorMessage = 'Formato de email inválido.';
         }
         showMessage(errorMessage, 'error');
     } finally {
@@ -225,16 +219,15 @@ async function handleLogin() {
 }
 
 /**
- * Tenta criar uma nova conta de usuário com email e senha.
+ * Tenta criar uma nova conta de usuário no Supabase.
  */
 async function handleSignUp() {
     console.log('Tentando criar conta...');
     showLoading();
-    const username = signupUsernameInput.value.trim(); // Captura o nome de usuário
+    const username = signupUsernameInput.value.trim();
     const email = signupEmailInput.value.trim();
     const password = signupPasswordInput.value.trim();
 
-    // Expressão regular para validar formato de e-mail
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
     if (!username || !email || !password) {
@@ -242,7 +235,7 @@ async function handleSignUp() {
         hideLoading();
         return;
     }
-    if (!emailRegex.test(email)) { // Valida o formato do e-mail
+    if (!emailRegex.test(email)) {
         showMessage('Formato de e-mail inválido. Exemplo: seu.email@exemplo.com', 'error');
         hideLoading();
         return;
@@ -254,37 +247,35 @@ async function handleSignUp() {
     }
 
     try {
-        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-        const user = userCredential.user;
+        const { data, error } = await supabase.auth.signUp({
+            email: email,
+            password: password,
+        });
 
-        // Salva o nome de usuário no Firestore em um documento de usuário
-        const userDocRef = doc(db, `artifacts/${appId}/users/${user.uid}`);
-        await setDoc(userDocRef, {
-            email: user.email,
-            username: username, // Salva o nome de usuário
-            createdAt: new Date()
-        }, { merge: true }); // merge: true para não sobrescrever outros campos se existirem
+        if (error) throw error;
 
-        showMessage('Conta criada com sucesso! Você já está logado.', 'success');
-        console.log('Conta criada com sucesso para:', email, 'Username:', username);
+        // Após criar a conta no auth.users, salva o nome de usuário na tabela 'users'
+        // É importante que a política de RLS para INSERT na tabela 'users' permita isso.
+        const { error: insertError } = await supabase
+            .from('users')
+            .insert([
+                { id: data.user.id, username: username, email: email }
+            ]);
+
+        if (insertError) throw insertError;
+
+        showMessage('Conta criada com sucesso! Verifique seu e-mail para confirmar a conta.', 'success');
+        console.log('Conta criada com sucesso para:', data.user.email, 'Username:', username);
+        // updateUIForAuthState será chamado pelo listener onAuthStateChange após a confirmação do email
     } catch (error) {
         console.error("Erro ao criar conta:", error);
         let errorMessage = 'Erro ao criar conta.';
-        if (error.code) {
-            errorMessage += ` Código: ${error.code}.`;
-        }
-        if (error.message) {
-            errorMessage += ` Mensagem: ${error.message}.`;
-        }
-
-        if (error.code === 'auth/email-already-in-use') {
+        if (error.message.includes('User already registered')) {
             errorMessage = 'Este email já está em uso. Tente fazer login ou use outro email.';
-        } else if (error.code === 'auth/weak-password') {
+        } else if (error.message.includes('Password should be at least 6 characters')) {
             errorMessage = 'A senha é muito fraca. Por favor, use uma senha mais forte.';
-        } else if (error.code === 'auth/invalid-email') {
-            errorMessage = 'Formato de email inválido.'; // Esta mensagem será sobreposta pela nossa validação customizada se o formato for o problema
-        } else if (error.code === 'auth/api-key-not-valid') {
-            errorMessage = 'Erro de configuração do Firebase. A chave da API não é válida ou o domínio não está autorizado. Verifique as configurações do seu projeto Firebase e adicione `localhost` e `127.0.0.1` aos domínios autorizados.';
+        } else if (error.message.includes('Invalid email address')) {
+            errorMessage = 'Formato de email inválido.';
         }
         showMessage(errorMessage, 'error');
     } finally {
@@ -293,15 +284,17 @@ async function handleSignUp() {
 }
 
 /**
- * Desloga o usuário.
+ * Desloga o usuário do Supabase.
  */
 async function handleSignOut() {
     console.log('Tentando sair...');
     showLoading();
     try {
-        await signOut(auth);
+        const { error } = await supabase.auth.signOut();
+        if (error) throw error;
         showMessage('Você saiu com sucesso!', 'success');
         console.log('Usuário saiu.');
+        // updateUIForAuthState será chamado pelo listener onAuthStateChange
     } catch (error) {
         console.error("Erro ao sair:", error);
         showMessage(`Erro ao sair: ${error.message}`, 'error');
@@ -347,10 +340,10 @@ async function fetchProductInfo(url) {
     }
 }
 
-// --- Funções do Firestore (Wishlist) ---
+// --- Funções do Banco de Dados Supabase (Wishlist) ---
 
 /**
- * Adiciona um novo item à wishlist do usuário no Firestore.
+ * Adiciona um novo item à wishlist do usuário no Supabase.
  * @param {string} name - Nome do produto.
  * @param {string} imageUrl - URL da imagem do produto.
  * @param {string} productUrl - URL do produto.
@@ -364,16 +357,21 @@ async function addWishlistItem(name, imageUrl, productUrl, description) {
     console.log('Adicionando item à wishlist...');
     showLoading();
     try {
-        // Define o caminho da coleção para dados privados do usuário
-        const userWishlistRef = collection(db, `artifacts/${appId}/users/${currentUserId}/wishlist`);
-        await addDoc(userWishlistRef, {
-            name,
-            imageUrl,
-            productUrl,
-            description,
-            purchased: false,
-            createdAt: new Date()
-        });
+        const { error } = await supabase
+            .from('wishlist_items')
+            .insert([
+                {
+                    user_id: currentUserId, // Supabase usa user_id para referenciar auth.users.id
+                    name,
+                    image_url: imageUrl, // Supabase usa snake_case por convenção
+                    product_url: productUrl,
+                    description,
+                    purchased: false,
+                }
+            ]);
+
+        if (error) throw error;
+
         // Limpa os campos após adicionar
         itemUrlInput.value = '';
         itemNameInput.value = '';
@@ -384,7 +382,8 @@ async function addWishlistItem(name, imageUrl, productUrl, description) {
         previewName.textContent = '';
 
         showMessage('Item adicionado com sucesso!', 'success');
-        console.log('Item adicionado ao Firestore.');
+        console.log('Item adicionado ao Supabase.');
+        loadWishlistItems(); // Recarrega a lista para mostrar o novo item
     } catch (error) {
         console.error("Erro ao adicionar item:", error);
         showMessage(`Erro ao adicionar item: ${error.message}`, 'error');
@@ -394,18 +393,25 @@ async function addWishlistItem(name, imageUrl, productUrl, description) {
 }
 
 /**
- * Exclui um item da wishlist do usuário no Firestore.
- * @param {string} itemId - ID do documento do item a ser excluído.
+ * Exclui um item da wishlist do usuário no Supabase.
+ * @param {number} itemId - ID do item a ser excluído.
  */
 async function deleteWishlistItem(itemId) {
     if (!currentUserId) return;
     console.log('Excluindo item da wishlist:', itemId);
     showLoading();
     try {
-        const itemRef = doc(db, `artifacts/${appId}/users/${currentUserId}/wishlist`, itemId);
-        await deleteDoc(itemRef);
+        const { error } = await supabase
+            .from('wishlist_items')
+            .delete()
+            .eq('id', itemId)
+            .eq('user_id', currentUserId); // Garante que apenas o próprio usuário pode excluir
+
+        if (error) throw error;
+
         showMessage('Item excluído com sucesso!', 'success');
-        console.log('Item excluído do Firestore.');
+        console.log('Item excluído do Supabase.');
+        loadWishlistItems(); // Recarrega a lista
     } catch (error) {
         console.error("Erro ao excluir item:", error);
         showMessage(`Erro ao excluir item: ${error.message}`, 'error');
@@ -415,8 +421,8 @@ async function deleteWishlistItem(itemId) {
 }
 
 /**
- * Alterna o status de "comprado" de um item na wishlist.
- * @param {string} itemId - ID do documento do item.
+ * Alterna o status de "comprado" de um item na wishlist no Supabase.
+ * @param {number} itemId - ID do item.
  * @param {boolean} isPurchased - O novo status de comprado.
  */
 async function togglePurchased(itemId, isPurchased) {
@@ -424,15 +430,50 @@ async function togglePurchased(itemId, isPurchased) {
     console.log('Alternando status de comprado para item:', itemId, 'para', isPurchased);
     showLoading();
     try {
-        const itemRef = doc(db, `artifacts/${appId}/users/${currentUserId}/wishlist`, itemId);
-        await updateDoc(itemRef, {
-            purchased: isPurchased
-        });
+        const { error } = await supabase
+            .from('wishlist_items')
+            .update({ purchased: isPurchased })
+            .eq('id', itemId)
+            .eq('user_id', currentUserId); // Garante que apenas o próprio usuário pode atualizar
+
+        if (error) throw error;
+
         showMessage(`Item marcado como ${isPurchased ? 'comprado' : 'não comprado'}!`, 'success');
-        console.log('Status de comprado atualizado no Firestore.');
+        console.log('Status de comprado atualizado no Supabase.');
+        loadWishlistItems(); // Recarrega a lista
     } catch (error) {
         console.error("Erro ao atualizar item:", error);
         showMessage(`Erro ao atualizar item: ${error.message}`, 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+/**
+ * Carrega e renderiza os itens da wishlist para o usuário atual do Supabase.
+ */
+async function loadWishlistItems() {
+    if (!currentUserId) {
+        console.log('Nenhum usuário logado para carregar a wishlist.');
+        wishlistItemsDiv.innerHTML = '<p class="text-center text-gray-500 col-span-full" id="no-items-message">Nenhum item na sua wishlist ainda. Adicione um!</p>';
+        return;
+    }
+    console.log('Carregando itens da wishlist para o usuário:', currentUserId);
+    showLoading();
+    try {
+        const { data: items, error } = await supabase
+            .from('wishlist_items')
+            .select('*')
+            .eq('user_id', currentUserId)
+            .order('created_at', { ascending: false }); // Ordena por data de criação
+
+        if (error) throw error;
+
+        renderWishlist(items);
+        console.log('Itens da wishlist carregados e renderizados.');
+    } catch (error) {
+        console.error("Erro ao carregar itens da wishlist:", error);
+        showMessage(`Erro ao carregar wishlist: ${error.message}`, 'error');
     } finally {
         hideLoading();
     }
@@ -443,7 +484,6 @@ async function togglePurchased(itemId, isPurchased) {
  * @param {Array<Object>} items - Array de objetos de item da wishlist.
  */
 function renderWishlist(items) {
-    console.log('Renderizando wishlist. Itens:', items.length);
     wishlistItemsDiv.innerHTML = ''; // Limpa a lista existente
     if (items.length === 0) {
         wishlistItemsDiv.innerHTML = '<p class="text-center text-gray-500 col-span-full">Nenhum item na sua wishlist ainda. Adicione um!</p>';
@@ -460,14 +500,14 @@ function renderWishlist(items) {
 
         itemElement.innerHTML = `
             <div class="flex-shrink-0 w-full h-48 bg-gray-800 rounded-md overflow-hidden flex items-center justify-center mb-3">
-                <img src="${item.imageUrl || 'https://placehold.co/400x200/2d2d2d/e0e0e0?text=Sem+Imagem'}"
+                <img src="${item.image_url || 'https://placehold.co/400x200/2d2d2d/e0e0e0?text=Sem+Imagem'}"
                      alt="${item.name}"
                      class="object-cover w-full h-full"
                      onerror="this.onerror=null;this.src='https://placehold.co/400x200/2d2d2d/e0e0e0?text=Sem+Imagem';">
             </div>
             <h3 class="text-xl font-semibold text-blue-400">${item.name}</h3>
             ${item.description ? `<p class="text-sm text-gray-400 flex-grow">${item.description}</p>` : ''}
-            ${item.productUrl ? `<a href="${item.productUrl}" target="_blank" class="text-red-500 hover:underline text-sm"><i class="fas fa-external-link-alt mr-1"></i>Ver Produto</a>` : ''}
+            ${item.product_url ? `<a href="${item.product_url}" target="_blank" class="text-red-500 hover:underline text-sm"><i class="fas fa-external-link-alt mr-1"></i>Ver Produto</a>` : ''}
             <div class="flex justify-between items-center mt-auto pt-3 border-t border-gray-700">
                 <button data-id="${item.id}" data-purchased="${item.purchased}"
                         class="toggle-purchased-btn text-sm px-3 py-1 rounded-full ${item.purchased ? 'bg-green-600 hover:bg-green-700' : 'bg-yellow-600 hover:bg-yellow-700'} text-white transition-colors">
@@ -501,72 +541,22 @@ function renderWishlist(items) {
     });
 }
 
-/**
- * Configura o listener em tempo real para a wishlist do usuário.
- * @param {string} userId - O ID do usuário logado.
- */
-function setupRealtimeListener(userId) {
-    console.log('Configurando listener em tempo real para o usuário:', userId);
-    if (unsubscribeFromWishlist) {
-        unsubscribeFromWishlist(); // Desinscreve qualquer listener anterior
-        console.log('Listener anterior desinscrito.');
-    }
-    const userWishlistRef = collection(db, `artifacts/${appId}/users/${userId}/wishlist`);
-    // Ordena por data de criação para exibir os mais novos primeiro
-    const q = query(userWishlistRef); // Firestore não suporta orderBy sem índice, então vamos ordenar no JS.
-
-    unsubscribeFromWishlist = onSnapshot(q, (snapshot) => {
-        console.log('Atualização de snapshot do Firestore recebida.');
-        const items = [];
-        snapshot.forEach(doc => {
-            items.push({ id: doc.id, ...doc.data() });
-        });
-        // Ordena os itens por data de criação no JavaScript
-        items.sort((a, b) => (b.createdAt?.toDate() || 0) - (a.createdAt?.toDate() || 0));
-        renderWishlist(items);
-    }, (error) => {
-        console.error("Erro ao ouvir a wishlist:", error);
-        showMessage(`Erro ao carregar wishlist: ${error.message}`, 'error');
-    });
-}
-
 // --- Event Listeners ---
 
 // Listeners para mostrar os formulários específicos
-showLoginFormBtn.addEventListener('click', () => {
-    console.log('Botão "Já tenho uma conta (Entrar)" clicado.');
-    showLoginForm();
-});
-showSignupFormBtn.addEventListener('click', () => {
-    console.log('Botão "Quero criar uma conta" clicado.');
-    showSignupForm();
-});
+showLoginFormBtn.addEventListener('click', showLoginForm);
+showSignupFormBtn.addEventListener('click', showSignupForm);
 
 // Listeners para os botões de voltar
-backToChoicesFromLoginBtn.addEventListener('click', () => {
-    console.log('Botão "Voltar" do login clicado.');
-    showInitialAuthChoices();
-});
-backToChoicesFromSignupBtn.addEventListener('click', () => {
-    console.log('Botão "Voltar" do cadastro clicado.');
-    showInitialAuthChoices();
-});
+backToChoicesFromLoginBtn.addEventListener('click', showInitialAuthChoices);
+backToChoicesFromSignupBtn.addEventListener('click', showInitialAuthChoices);
 
 // Listeners para os botões de submissão dos formulários
-loginSubmitBtn.addEventListener('click', () => {
-    console.log('Botão "Entrar" do formulário de login clicado.');
-    handleLogin();
-});
-signupSubmitBtn.addEventListener('click', () => {
-    console.log('Botão "Criar Conta" do formulário de cadastro clicado.');
-    handleSignUp();
-});
+loginSubmitBtn.addEventListener('click', handleLogin);
+signupSubmitBtn.addEventListener('click', handleSignUp);
 
 // Listener para o botão de sair
-logoutBtn.addEventListener('click', () => {
-    console.log('Botão "Sair" clicado.');
-    handleSignOut();
-});
+logoutBtn.addEventListener('click', handleSignOut);
 
 // Listener para o botão "Buscar Info" (Web Scraping)
 fetchProductBtn.addEventListener('click', async () => {
@@ -588,11 +578,9 @@ fetchProductBtn.addEventListener('click', async () => {
     }
 });
 
-
 // Listener para o formulário de adicionar item
 addItemForm.addEventListener('submit', (e) => {
     e.preventDefault();
-    console.log('Formulário de adicionar item submetido.');
     const name = itemNameInput.value.trim();
     const url = itemUrlInput.value.trim();
     const imageUrl = itemImageUrlInput.value.trim();
@@ -606,24 +594,21 @@ addItemForm.addEventListener('submit', (e) => {
 });
 
 // Listener para fechar o modal de mensagem
-closeModalBtn.addEventListener('click', () => {
-    console.log('Botão "OK" do modal de mensagem clicado.');
-    hideMessage();
-});
+closeModalBtn.addEventListener('click', hideMessage);
 
 // --- Inicialização ---
 
-// Observa mudanças no estado de autenticação do Firebase
-onAuthStateChanged(auth, (user) => {
-    console.log('Estado de autenticação do Firebase alterado.');
-    updateUIForAuthState(user);
+// Listener de estado de autenticação do Supabase
+supabase.auth.onAuthStateChange((event, session) => {
+    console.log('Supabase Auth state changed:', event, session);
+    updateUIForAuthState(session);
 });
 
 // Garante que as opções iniciais de autenticação sejam mostradas ao carregar a página
 // se o usuário não estiver logado.
-window.onload = () => {
-    console.log('Página carregada. Verificando estado de autenticação inicial.');
-    if (!auth.currentUser) {
-        showInitialAuthChoices();
-    }
+window.onload = async () => {
+    showLoading();
+    // Tenta obter a sessão atual ao carregar a página
+    const { data: { session } } = await supabase.auth.getSession();
+    updateUIForAuthState(session);
 };
